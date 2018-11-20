@@ -1,3 +1,5 @@
+**Note, this repository is no longer actively maintained.**
+
 # ~/.dotfiles
 
 This repository contains dotfiles that I use, as well as a system for installing and keeping them up to date. You are welcome to use this too, and I try to make that easy!
@@ -16,8 +18,7 @@ This repository contains dotfiles that I use, as well as a system for installing
 
 ## Installation
 
-1. `wget -O ~/.zshrc https://raw.github.com/alexjurkiewicz/dotfiles/master/zshrc`
-2. `exec zsh -il`
+`wget -O ~/.zshrc https://raw.github.com/alexjurkiewicz/dotfiles/master/zshrc && exec zsh -il`
 
 Then you can:
 

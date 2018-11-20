@@ -36,7 +36,9 @@ autoload colors && colors
 # What are we?
 export FULLHOST=$(hostname --fqdn 2>/dev/null || hostname -f 2>/dev/null || hostname)
 export SHORTHOST=$(echo $FULLHOST | cut -d. -f1-2)
-insudo() { [[ -n $SUDO_USER ]] && [[ $USER != $SUDO_USER ]] }
+insudo() {
+    [[ -n $SUDO_USER ]] && [[ $USER != $SUDO_USER ]]
+}
 
 # Where are we?
 case $FULLHOST in
@@ -90,12 +92,12 @@ if ! egrep -q "^export LANG=" ~/.zshrc.local.before ~/.zshrc.local.cache 2>/dev/
 fi
 
 zmodload zsh/stat
-echo ${^fpath}/url-quote-magic(N) | grep -q url-quote-magic && autoload -U url-quote-magic && zle -N self-insert url-quote-magic
+echo "${^fpath}/url-quote-magic(N)" | grep -q url-quote-magic && autoload -U url-quote-magic && zle -N self-insert url-quote-magic
 autoload -U zargs
 
 WORDCHARS='*?_-.[]~=&;!#$%^(){}<>' #Removed '/'
 
-HISTFILE=~/.histfile
+HISTFILE=~/.histfile.$FULLHOST
 HISTSIZE=100000
 SAVEHIST=100000
 setopt nobeep interactivecomments kshglob autocd histfindnodups noflowcontrol extendedglob extendedhistory
@@ -115,8 +117,13 @@ bindkey '^E' end-of-line
 # gnome terminal, konsole, terminator, iTerm (basically everything except Putty)
 bindkey '^[5D' emacs-backward-word      # ctrl-left (Linux)
 bindkey '^[5C' emacs-forward-word       # ctrl-right (Linux)
-bindkey '^[[1;5C' emacs-forward-word    # ctrl-left (FreeBSD, OS X)
-bindkey '^[[1;5D' emacs-backward-word   # ctrl-right (FreeBSD, OS X)
+bindkey '^[[1;5C' emacs-forward-word    # ctrl-left (FreeBSD)
+bindkey '^[[1;5D' emacs-backward-word   # ctrl-right (FreeBSD)
+                                        # OS X 10.10 (Yosemite) doesn't seem to allow ctrl-arrow reliably
+                                        # Instead, use Karabiner to remap ctrl-arrow to opt-arrow and use
+                                        # these binds:
+bindkey '^[[1;9D' backward-word         # option-left
+bindkey '^[[1;9C' forward-word          # option-right
 bindkey '^[OH' beginning-of-line        # home (Linux, FreeBSD)
 bindkey '^[OF' end-of-line              # end (Linux, FreeBSD)
 bindkey '^[[H' beginning-of-line        # home (OS X)
@@ -197,7 +204,24 @@ export LESS_TERMCAP_so=$'\E[01;44;33m'
 export LESS_TERMCAP_ue=$'\E[0m'
 export LESS_TERMCAP_us=$'\E[01;32m'
 export MYSQL_HISTFILE="/dev/null"
+export ACK_PAGER="less -R"
 
+# Try to reuse any existing SSH_AUTH_SOCK if one is not defined
+if [[ -z $SSH_AUTH_SOCK ]] ; then
+    case $(uname -s) in
+        Darwin)
+            pattern='*/launch-*/Listeners'
+            ;;
+        *)
+            pattern='*/ssh*/agent*'
+            ;;
+    esac
+    potential_socket=$(find /tmp/ -user ${SUDO_UID:-$UID} -type s -path $pattern 2>/dev/null | head -1)
+    if [[ -r $potential_socket ]] ; then
+        echo "Found an existing SSH auth socket: $potential_socket"
+        export SSH_AUTH_SOCK=$potential_socket
+    fi
+fi
 # SSH Agent. Store agent details in a file. Load the details and if they're invalid create a new agent.
 ssh-agent () { 
     [[ -S $SSH_AUTH_SOCK ]] && echo "Agent socket already defined." && return
@@ -240,8 +264,15 @@ alias t=tmux
 alias s=screen
 alias g=git
 dstat --list &>/dev/null && alias dstat="dstat -tpcmdgn --top-cpu --top-bio" || alias dstat="dstat -tpcmdgn" # a little hacky, but I believe --top-cpu and --top-bio have always been core dstat plugins so just check if this dstat version has the plugin system
-setenv() { export $1=$2 } # Woohoo csh
-sudo() { [[ $1 == (vi|vim) ]] && ( shift && sudoedit "$@" ) || command sudo "$@"; } # sudo vi/vim => sudoedit
+setenv() { export $1=$2l } # Woohoo csh
+# convert 'sudo vim? $@' to 'sudoedit $@'
+sudo() {
+    if [[ $1 == (vi|vim) ]] ; then
+        ( shift && sudoedit "$@" )
+    else
+        command sudo "$@"
+    fi
+}
 excuse() { nc bofh.jeffballard.us 666 | tail -1 | sed -e 's/.*: //' }
 hl() { pattern=$(echo $1 | sed 's!\/!\\/!g') ; sed "s/$pattern/[1m[31m&[0m/g;" } # Like grep, but prints non-matching lines
 clean () {
@@ -257,16 +288,8 @@ clean () {
 [[ -f /usr/share/pyshared/bzrlib/patiencediff.py ]] && alias pdiff="python /usr/share/pyshared/bzrlib/patiencediff.py"
 alias portsnap-update='sudo portsnap fetch && sudo portsnap update' # FreeBSD
 puppetup () {
-    case $(puppet --version) in
-        3.*)
-            echo '$ sudo puppet agent -to'
-            sudo puppet agent -to
-            ;;
-        *)
-            echo '$ sudo puppetd -t'
-            sudo puppetd -t
-            ;;
-    esac
+    echo '$ sudo puppet agent -t'
+    sudo puppet agent -t
 }
 puppet-syntax-check () {
     if [[ -f "${1=.}" ]] ; then
@@ -396,7 +419,7 @@ if is-at-least 4.3.7 ; then
         vcs_info
         if [[ -n $vcs_info_msg_0_ ]] ; then # we're in a repository
             if [[ $vcs_info_msg_0_ = git ]] ; then
-                revname=$(git name-rev --always --name-only HEAD)
+                revname=$(git name-rev --always --name-only HEAD 2>/dev/null)
                 is-at-least 4.3.10 || vcs_info_msg_1_=$(git rev-list --max-count 1 HEAD) # older zsh missed this feature
                 rev=$vcs_info_msg_1_[0,7] # 7 chars is enough revhash for anyone
                 [[ -n $vcs_info_msg_3_ ]] && action="$vcs_info_msg_3_ " || action=""
@@ -426,6 +449,7 @@ if ! insudo ; then
     else
         ( # Run in a subshell so if you ctrl-c during this you don't end up with strange CWD.
             # If we can see a newer revision in origin/master, tell the user, otherwise fetch origin/master and check on next shell initialisation.
+            [[ -x $(which git) ]] || exit 0 # If there's no git on this system, don't try and auto-update
             cd ~/.dotfiles
             if [[ $(git rev-parse HEAD) != $(git rev-parse origin/master) ]] ; then
                 if [[ -n "$(git rev-list HEAD..origin/master)" ]] ; then
